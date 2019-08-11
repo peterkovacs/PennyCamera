@@ -27,7 +27,6 @@ class CameraViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
 
-
         cameraController =
             CameraController(isCoinMode: isCoinMode,
                              regionOfInterest: regionOfInterest.frame,
@@ -47,7 +46,7 @@ class CameraViewController: UIViewController {
                 print(error)
             }
 
-//           try? self.cameraController.displayPreview(on: self.capturePreviewView)
+            try? self.cameraController?.displayPreview(on: self.capturePreviewView)
         }
     }
 
@@ -104,7 +103,7 @@ class CameraViewController: UIViewController {
 
 extension CameraViewController: CameraDelegate {
 
-    func didProcess(image: UIImage) {
+    func didProcess(image: UIImage?) {
         self.imageView.image = image
     }
 }

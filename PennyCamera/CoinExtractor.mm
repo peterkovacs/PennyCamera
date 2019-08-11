@@ -21,7 +21,7 @@ static const float kMinCWAngle = 170.0;
 
 static cv::Mat threshold(const cv::Mat &mat ) {
     cv::Mat gray;
-    cv::cvtColor(mat, gray, cv::COLOR_BGR2GRAY);
+    cv::cvtColor(mat, gray, cv::COLOR_BGRA2GRAY);
     cv::GaussianBlur(gray, gray, cv::Size(3, 3), 0, 0, cv::BORDER_DEFAULT);
     cv::threshold(gray, gray, 243, 255, cv::THRESH_TRUNC);
     cv::adaptiveThreshold(gray, gray, 255, cv::ADAPTIVE_THRESH_GAUSSIAN_C, cv::THRESH_BINARY, 11, -2.0);
@@ -37,13 +37,14 @@ static std::optional<cv::RotatedRect> findEllipse( const cv::Mat &mat, cv::Rect2
     cv::findContours(mat, contours, hierarchy, cv::RETR_CCOMP, cv::CHAIN_APPROX_SIMPLE);
 
     int aspectRatio = 0, heightTooSmall = 0, widthTooSmall = 0, wrongAngle = 0, tooBig = 0, notEnoughPoints = 0, notContained = 0;
+    float maxWidth = std::numeric_limits<float>::min();
 
     std::for_each( contours.begin(), contours.end(), [&](const std::vector<cv::Point2i>& contour) {
         if( contour.size() >= 5) {
             cv::RotatedRect rect = cv::fitEllipseDirect(contour);
             cv::Rect2f bounding = rect.boundingRect();
             if( rect.size.area() > roi.area() )                                 { ++tooBig; }
-            else if( abs(rect.size.width  - roi.width)  > roi.width * 0.25 )    { ++widthTooSmall; }
+            else if( abs(rect.size.width  - roi.width)  > roi.width * 0.25 )    { maxWidth = std::max( maxWidth, rect.size.width); ++widthTooSmall; }
             else if( abs(rect.size.height - roi.height) > roi.height * 0.25 )   { ++heightTooSmall; }
             else if( abs(rect.size.aspectRatio() - kAspectRatio) > 0.1 &&
                      abs(rect.size.aspectRatio() - kAspectRatioInverse) > 0.1 ) { ++aspectRatio; }
@@ -153,17 +154,46 @@ static cv::Rect2f scaleROI(CGRect roi, CGRect frame, CGSize image) {
 
     CGColorSpaceRelease(colorSpace);
 
-    cv::Mat mat8uc3(width, height, CV_8UC3);
-    cv::cvtColor(mat8uc4, mat8uc3, cv::COLOR_RGBA2BGR);
+//    cv::Mat mat8uc3(width, height, CV_8UC3);
+//    cv::cvtColor(mat8uc4, mat8uc3, cv::COLOR_RGBA2BGR);
 
     cv::Rect2f roi = scaleROI(rect, frame, image.extent.size);
-    std::optional<cv::RotatedRect> ellipse = findEllipse(threshold(mat8uc3(roi)), roi);
+    std::optional<cv::RotatedRect> ellipse = findEllipse(threshold(mat8uc4(roi)), roi);
 
     if( ellipse ) {
-        cv::ellipse(mat8uc3, ellipse.value(), cv::Scalar(127, 127, 255), 3);
+        cv::ellipse(mat8uc4, ellipse.value(), cv::Scalar(127, 127, 255), 3);
     }
 
-    return [UIImage fromMat:mat8uc3];
+    return [UIImage fromMat:mat8uc4];
+}
+
++ (UIImage *)drawEllipseOnPixelBuffer:(CVPixelBufferRef)buffer withROI:(CGRect)rect withFrame:(CGRect)frame {
+    OSType format = CVPixelBufferGetPixelFormatType(buffer);
+    CGRect videoRect = CGRectMake(0.0f, 0.0f, CVPixelBufferGetWidth(buffer), CVPixelBufferGetHeight(buffer));
+    size_t bytesPerRow = CVPixelBufferGetBytesPerRow(buffer);
+
+    assert(format == kCVPixelFormatType_32BGRA);
+
+    std::optional<cv::RotatedRect> ellipse;
+
+    {
+        CVPixelBufferLockBaseAddress(buffer, 0);
+        void *baseAddress = CVPixelBufferGetBaseAddress(buffer);
+        cv::Mat mat8uc4(videoRect.size.height, videoRect.size.width, CV_8UC4, baseAddress, bytesPerRow);
+        cv::Rect2f roi = scaleROI(rect, frame, videoRect.size);
+        ellipse = findEllipse(threshold(mat8uc4(roi)), roi);
+        CVPixelBufferUnlockBaseAddress(buffer, 0);
+    }
+
+    if( ellipse ) {
+        // TODO: Invert the transforms used to scale the roi so that we can return an image of frame.size.
+        cv::Mat result = cv::Mat(cv::Size2i(videoRect.size.width, videoRect.size.height), CV_8UC4, cv::Scalar(0, 0, 0, 0));
+        cv::ellipse(result, ellipse.value(), cv::Scalar(64, 64, 255, 255), 5);
+
+        return [UIImage fromMat:result];
+    }
+
+    return nil;
 }
 
 static cv::Mat rotate(const cv::Mat &mat, const cv::RotatedRect &ellipse) {
@@ -299,13 +329,6 @@ static cv::Mat resize(const cv::Mat &mat, size_t height) {
     UIImage *pngImage = [UIImage imageWithData:pngData];
 
     return pngImage;
-}
-
-void foo() {
-    unsigned char space[32];
-    CGColorSpaceRef colorSpace = CGColorSpaceCreateIndexed(NULL, 32, space);
-
-    CGColorSpaceRelease(colorSpace);
 }
 
 + (UIImage*)fromMat:(cv::Mat)cvMat {

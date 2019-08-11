@@ -10,7 +10,7 @@ import AVFoundation
 import UIKit
 
 protocol CameraDelegate {
-    func didProcess(image: UIImage)
+    func didProcess(image: UIImage?)
 }
 
 class CameraController: NSObject {
@@ -24,9 +24,14 @@ class CameraController: NSObject {
     var rearCamera: AVCaptureDevice?
     var rearCameraInput: AVCaptureDeviceInput?
     var videoOutput: AVCaptureVideoDataOutput?
+    var depthDataOutput: AVCaptureDepthDataOutput?
     var photoOutput: AVCapturePhotoOutput?
+    var outputSynchronizer: AVCaptureDataOutputSynchronizer?
     var previewLayer: AVCaptureVideoPreviewLayer?
     var flashMode: AVCaptureDevice.FlashMode = .off
+
+    var sessionQueue = DispatchQueue(label: "com.kovapps.travel.Camera.Session", attributes: [], autoreleaseFrequency: .workItem)
+    var dataOutputQueue = DispatchQueue(label: "com.kovapps.travel.Camera.Output", qos: .userInitiated, attributes: [], autoreleaseFrequency: .workItem)
 
     fileprivate var photoCaptureCompletionBlock: ((Result<UIImage, Error>) -> Void)?
 
@@ -47,12 +52,9 @@ class CameraController: NSObject {
     }
 
     func prepare(completionHandler: @escaping (Result<Void, Error>) -> ()) {
-        DispatchQueue(label: "com.kovapps.travel.Camera.prepare").async {
+        sessionQueue.async {
             do {
-                self.createCaptureSession()
-                try self.configureCaptureDevices()
-                try self.configureDeviceInputs()
-                try self.configurePhotoOutput()
+                try self.configureSession()
 
                 DispatchQueue.main.async {
                     completionHandler(.success(()))
@@ -94,28 +96,46 @@ class CameraController: NSObject {
 
         let settings = AVCapturePhotoSettings()
         settings.flashMode = self.flashMode
+        if let photoOutput = self.photoOutput, photoOutput.isDepthDataDeliveryEnabled {
+            settings.isDepthDataDeliveryEnabled = true
+            settings.isDepthDataFiltered = true
+        }
 
         self.photoOutput?.capturePhoto(with: settings, delegate: self)
         self.photoCaptureCompletionBlock = completion
     }
 
-    private func createCaptureSession() {
+
+    // MARK: Configure Capture Session
+
+    private func configureSession() throws {
         self.captureSession = AVCaptureSession()
-//        self.captureSession?.sessionPreset = .high
+
+        try self.configureCaptureDevices()
+        try self.configureDeviceInputs()
+        try self.configureOutputs()
     }
 
     private func configureCaptureDevices() throws {
-        let session = AVCaptureDevice.DiscoverySession(deviceTypes: [.builtInWideAngleCamera], mediaType: .video, position: .unspecified)
-        guard !session.devices.isEmpty else { throw CameraControllerError.noCamerasAvailable }
-
-        for camera in session.devices {
-            if camera.position == .back {
-                self.rearCamera = camera
-
-                try camera.lockForConfiguration()
-                camera.focusMode = .continuousAutoFocus
-                camera.unlockForConfiguration()
+        if let device = AVCaptureDevice.default(.builtInDualCamera, for: .video, position: .back) {
+            self.rearCamera = device
+            let availableFormats = device.formats.filter {
+                !$0.supportedDepthDataFormats.isEmpty && $0.mediaType == AVMediaType.video
             }
+            print("Available Formats", availableFormats)
+            print("Depth Data Formats", availableFormats[0].supportedDepthDataFormats)
+
+            try device.lockForConfiguration()
+            device.focusMode = .continuousAutoFocus
+            device.activeFormat = availableFormats[0]
+            device.activeDepthDataFormat = availableFormats[0].supportedDepthDataFormats.first
+            device.unlockForConfiguration()
+        } else if let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)  {
+            try device.lockForConfiguration()
+            device.focusMode = .continuousAutoFocus
+            device.unlockForConfiguration()
+        } else {
+            throw CameraControllerError.noCamerasAvailable
         }
     }
 
@@ -125,19 +145,19 @@ class CameraController: NSObject {
         if let rearCamera = self.rearCamera {
             let rearCameraInput = try AVCaptureDeviceInput(device: rearCamera)
 
-            if captureSession.canAddInput(rearCameraInput) {
-                captureSession.addInput(rearCameraInput)
-            }
+            guard captureSession.canAddInput(rearCameraInput) else { throw CameraControllerError.inputsAreInvalid }
+            captureSession.addInput(rearCameraInput)
 
             self.rearCameraInput = rearCameraInput
         }
         else { throw CameraControllerError.noCamerasAvailable }
     }
 
-    private func configurePhotoOutput() throws {
+    private func configureOutputs() throws {
         guard let captureSession = self.captureSession else { throw CameraControllerError.captureSessionIsMissing }
 
         captureSession.beginConfiguration()
+
         let photoOutput = AVCapturePhotoOutput()
         photoOutput.setPreparedPhotoSettingsArray(
             [AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])],
@@ -145,7 +165,11 @@ class CameraController: NSObject {
         )
         photoOutput.isHighResolutionCaptureEnabled = true
         photoOutput.isLivePhotoCaptureEnabled = false
-        photoOutput.isDepthDataDeliveryEnabled = photoOutput.isDepthDataDeliverySupported
+
+        // Capture Depth information for "Machine" pictures.
+        if photoOutput.isDepthDataDeliverySupported {
+            photoOutput.isDepthDataDeliveryEnabled = true
+        }
 
         if captureSession.canAddOutput(photoOutput) {
             captureSession.addOutput(photoOutput)
@@ -155,81 +179,110 @@ class CameraController: NSObject {
 
         let videoOutput = AVCaptureVideoDataOutput()
         videoOutput.videoSettings = [ kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA) ]
-
-        let queue = DispatchQueue(label: "com.kovapps.travel.Camera.VideoCapture")
-        videoOutput.setSampleBufferDelegate(self, queue: queue)
+        videoOutput.setSampleBufferDelegate(self, queue: dataOutputQueue)
         videoOutput.alwaysDiscardsLateVideoFrames = true
+
+        if #available(iOS 13.0, *) {
+            videoOutput.deliversPreviewSizedOutputBuffers = true
+        }
+
         if captureSession.canAddOutput(videoOutput) {
             captureSession.addOutput(videoOutput)
+
+            if let connection = videoOutput.connection(with: .video) {
+                connection.videoOrientation = .portrait
+            }
         }
         self.videoOutput = videoOutput
 
-//        let depthOutput = AVCaptureDepthDataOutput()
-//        depthOutput.setDelegate(self, callbackQueue: queue)
-//        depthOutput.alwaysDiscardsLateDepthData = true
-//
-//        if captureSession.canAddOutput(depthOutput) {
-//            captureSession.addOutput(depthOutput)
-//        } else {
-//            print("COULD NOT ADD AVCaptureDepthDataOutput()")
-//        }
+        let depthDataOutput = AVCaptureDepthDataOutput()
+        depthDataOutput.setDelegate(self, callbackQueue: dataOutputQueue)
+        depthDataOutput.alwaysDiscardsLateDepthData = true
+        depthDataOutput.isFilteringEnabled = true // i.e. smooth.
+
+        if captureSession.canAddOutput(depthDataOutput) {
+            captureSession.addOutput(depthDataOutput)
+
+            if let connection = depthDataOutput.connection(with: .depthData) {
+                connection.videoOrientation = .portrait
+                connection.isEnabled = true
+            }
+
+            // Use an AVCaptureDataOutputSynchronizer to synchronize the video data and depth data outputs.
+            // The first output in the dataOutputs array, in this case the AVCaptureVideoDataOutput, is the "master" output.
+            let outputSynchronizer = AVCaptureDataOutputSynchronizer(dataOutputs: [videoOutput, depthDataOutput])
+            outputSynchronizer.setDelegate(self, queue: dataOutputQueue)
+            self.outputSynchronizer = outputSynchronizer
+        }
+        self.depthDataOutput = depthDataOutput
 
         captureSession.commitConfiguration()
 
         try self.rearCamera?.lockForConfiguration()
-        self.rearCamera?.activeVideoMinFrameDuration = CMTime(value: 1, timescale: 20)
-        self.rearCamera?.unlockForConfiguration()
+
+        if let device = self.rearCamera {
+            let availableFormats = device.formats.filter {
+                !$0.supportedDepthDataFormats.isEmpty && $0.mediaType == AVMediaType.video
+            }
+            print("Available Formats", availableFormats)
+            print("Depth Data Formats", availableFormats[0].supportedDepthDataFormats)
+
+
+            device.focusMode = .continuousAutoFocus
+            device.activeFormat = availableFormats[0]
+            device.activeDepthDataFormat = availableFormats[0].supportedDepthDataFormats.first
+
+            device.activeVideoMinFrameDuration = CMTime(value: 1, timescale: 15)
+        }
 
         captureSession.startRunning()
+
+        rearCamera?.unlockForConfiguration()
     }
 
-    func machineFilter(_ input: CIImage, radius: CGFloat ) -> CIImage? {
-        let region = CoinExtractor.calculateScaledROI(regionOfInterest, frame: frame, extent: input.extent.size)
+    func process(video sampleBuffer: CMSampleBuffer) {
+        guard isCoinMode else { return }
+        guard let buffer: CVPixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
-        print("ROI", regionOfInterest, frame, input.extent.size, region)
+        let image = CoinExtractor.drawEllipse(on: buffer, withROI: regionOfInterest, withFrame: frame)
 
-        let overlay = CIImage(color: CIColor(red: 0.0, green: 1.0, blue: 0.0, alpha: 0.5))
-        let overlay2 = CIImage(color: CIColor(red: 0.0, green: 1.0, blue: 1.0, alpha: 0.5))
-            .cropped(to: region.insetBy(dx: -10.0, dy: 10.0))
-//            .transformed(by: CGAffineTransform(translationX: region.origin.x, y: region.origin.y))
-
-        return overlay2.composited(over: overlay.composited(over: input).cropped(to: region))
-
-        guard let maskedFilter = CIFilter(name: "CIMaskedVariableBlur") else { return nil }
-        maskedFilter.setValue(input, forKey: kCIInputImageKey)
-        maskedFilter.setValue(radius, forKey: kCIInputRadiusKey)
-        maskedFilter.setValue(overlay, forKey: "inputMask")
-
-        return maskedFilter.outputImage//?.cropped(to: region)
-
+        DispatchQueue.main.async {
+            self.delegate?.didProcess(image: image)
+        }
     }
 
+    func process(depth depthData: AVDepthData) {
+        guard !isCoinMode else { return }
+
+        let converted = depthData.converting(toDepthDataType: kCVPixelFormatType_DepthFloat32)
+        print("Processing depthData", converted.depthDataMap, CVPixelBufferGetWidth(converted.depthDataMap), CVPixelBufferGetHeight(converted.depthDataMap))
+
+    }
 }
 
 extension CameraController: AVCaptureVideoDataOutputSampleBufferDelegate {
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        guard let buffer: CVPixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-
-        CVPixelBufferLockBaseAddress(buffer, .readOnly)
-        let image = CIImage(cvImageBuffer: buffer).oriented(.right)
-        let resultImage = isCoinMode ?
-            CoinExtractor.drawEllipse(on: image, with: context, withROI: regionOfInterest, withFrame: frame) :
-            machineFilter(image, radius: 10).map { UIImage(ciImage: $0) }
-        CVPixelBufferUnlockBaseAddress(buffer, .readOnly)
-
-        if let resultImage = resultImage {
-            DispatchQueue.main.async {
-                self.delegate?.didProcess(image: resultImage)
-            }
-        }
+        process(video: sampleBuffer)
     }
 }
 
-//extension CameraController: AVCaptureDepthDataOutputDelegate {
-//    func depthDataOutput(_ output: AVCaptureDepthDataOutput, didOutput depthData: AVDepthData, timestamp: CMTime, connection: AVCaptureConnection) {
-//
-//    }
-//}
+extension CameraController: AVCaptureDepthDataOutputDelegate {
+    func depthDataOutput(_ output: AVCaptureDepthDataOutput, didOutput depthData: AVDepthData, timestamp: CMTime, connection: AVCaptureConnection) {
+        process(depth: depthData)
+    }
+}
+
+extension CameraController: AVCaptureDataOutputSynchronizerDelegate {
+    func dataOutputSynchronizer(_ synchronizer: AVCaptureDataOutputSynchronizer, didOutput synchronizedDataCollection: AVCaptureSynchronizedDataCollection) {
+        if let videoOutput = self.videoOutput, let video = synchronizedDataCollection.synchronizedData(for: videoOutput) as? AVCaptureSynchronizedSampleBufferData, !video.sampleBufferWasDropped {
+            process(video: video.sampleBuffer)
+        }
+
+        if let depthDataOutput = self.depthDataOutput, let depth = synchronizedDataCollection.synchronizedData(for: depthDataOutput) as? AVCaptureSynchronizedDepthData, !depth.depthDataWasDropped {
+            process(depth: depth.depthData)
+        }
+    }
+}
 
 extension CameraController: AVCapturePhotoCaptureDelegate {
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
@@ -247,8 +300,6 @@ extension CameraController: AVCapturePhotoCaptureDelegate {
             photoCaptureCompletionBlock?(.failure(CameraControllerError.inputsAreInvalid))
             return
         }
-
-        AudioServicesPlaySystemSound(kSystemSoundID_Vibrate)
 
         photoCaptureCompletionBlock?(.success(image))
     }
