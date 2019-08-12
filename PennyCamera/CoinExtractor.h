@@ -18,10 +18,9 @@
 
 @interface CoinExtractor : NSObject
 + (nonnull NSString*)openCVVersionString;
-+ (nullable UIImage *)drawEllipseOnCIImage:(nonnull CIImage *)image withContext:(nonnull CIContext*)context withROI:(CGRect)rect withFrame:(CGRect)frame;
-+ (nullable UIImage *)drawEllipseOnImage:(nonnull UIImage *)image withROI:(CGRect)rect withFrame:(CGRect)frame;
 + (nullable UIImage *)drawEllipseOnPixelBuffer:(nonnull CVPixelBufferRef)buffer withROI:(CGRect)rect withFrame:(CGRect)frame;
 + (nullable UIImage *)captureEllipseOnImage:(nonnull UIImage *)image withROI:(CGRect)rect withFrame:(CGRect)frame;
++ (nullable UIImage *)captureMachineOnImage:(nonnull UIImage *)image withROI:(CGRect)rect withFrame:(CGRect)frame;
 + (CGRect)calculateScaledROI:(CGRect) roi frame:(CGRect)frame extent:(CGSize)image;
 
 @end

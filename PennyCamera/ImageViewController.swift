@@ -32,9 +32,9 @@ class ImageViewController: UIViewController {
 
     @objc func save() {
         print("Saving Coin")
-        let url = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true).appendingPathComponent(UUID().uuidString).appendingPathExtension("png")
+        let url = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true).appendingPathComponent(UUID().uuidString).appendingPathExtension("jpg")
         let location = LocationManager.instance.location
-        guard image.save(png: url, with: location) else { return }
+        guard image.save(jpeg: url, with: location) else { return }
 
         do {
             try PHPhotoLibrary.shared().performChangesAndWait {

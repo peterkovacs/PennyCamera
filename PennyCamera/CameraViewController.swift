@@ -20,6 +20,7 @@ class CameraViewController: UIViewController {
     @IBOutlet fileprivate weak var captureButton: UIButton!
     @IBOutlet fileprivate weak var capturePreviewView: UIView!
     @IBOutlet fileprivate weak var regionOfInterest: UIView!
+    @IBOutlet fileprivate weak var machineRegionOfInterest: UIView!
     @IBOutlet fileprivate weak var imageView: UIImageView!
     @IBOutlet fileprivate weak var coinModeButton: UIButton!
     @IBOutlet fileprivate weak var machineModeButton: UIButton!
@@ -41,6 +42,10 @@ class CameraViewController: UIViewController {
         regionOfInterest.layer.borderWidth = 5
         regionOfInterest.layer.cornerRadius = 8
 
+        machineRegionOfInterest.layer.borderColor = UIColor.white.cgColor
+        machineRegionOfInterest.layer.borderWidth = 5
+        machineRegionOfInterest.layer.cornerRadius = 8
+
         cameraController?.prepare { result in
             if case .failure(let error) = result {
                 print(error)
@@ -54,6 +59,9 @@ class CameraViewController: UIViewController {
         cameraController?.isCoinMode = isCoinMode
         machineModeButton?.isHidden = isCoinMode
         coinModeButton?.isHidden = !isCoinMode
+
+        regionOfInterest.isHidden = !isCoinMode
+        machineRegionOfInterest.isHidden = isCoinMode
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -69,31 +77,47 @@ class CameraViewController: UIViewController {
     }
 
     @IBAction func buttonTapped(_ sender: Any) {
-        try? cameraController?.captureImage(completion: processCapture(result:))
+        if isCoinMode {
+            try? cameraController?.captureImage(completion: captureCoin(result:))
+        } else {
+            try? cameraController?.captureImage(completion: captureMachine(result:))
+        }
     }
 
-    func processCapture(result: Result<UIImage, Error>) {
+    func present(image: UIImage) {
+        let storyboard = UIStoryboard(name: "Main", bundle: nil)
+        let controller = storyboard.instantiateViewController(withIdentifier: "ImageView") as! ImageViewController
+        controller.image = image
+        navigationController?.pushViewController(controller, animated: true)
+    }
+
+    func captureMachine(result: Result<UIImage, Error>) {
+        switch result {
+        case .failure(let error): print(error)
+        case .success(let image):
+            guard let processed =
+                CoinExtractor.captureMachine(on: image.fixedOrientation(),
+                                             withROI: machineRegionOfInterest.frame,
+                                             withFrame: view.frame) else { return }
+            present(image: processed)
+        }
+    }
+
+    func captureCoin(result: Result<UIImage, Error>) {
         switch( result ) {
         case .failure(let error): print(error)
         case .success(let image):
-            let storyboard = UIStoryboard(name: "Main", bundle: nil)
-            let controller =
-                storyboard.instantiateViewController(withIdentifier: "ImageView") as! ImageViewController
-            print(image.size, image.scale)
-
             guard let processed =
                 CoinExtractor.captureEllipse(on: image.fixedOrientation(),
                                              withROI: regionOfInterest.frame,
                                              withFrame: view.frame) else { return }
-
-            controller.image = processed
-            print(processed.size, processed.scale)
-            navigationController?.pushViewController(controller, animated: true)
+            present(image: processed)
         }
     }
 
     @IBAction func toggleMode(_ sender: Any) {
         isCoinMode.toggle()
+        self.imageView.image = nil
     }
 
     override var prefersStatusBarHidden: Bool { true }

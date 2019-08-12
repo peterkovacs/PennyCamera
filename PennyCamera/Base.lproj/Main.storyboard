@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="14845" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" useTraitCollections="YES" useSafeAreas="YES" colorMatched="YES" initialViewController="0dS-yy-a44">
+<document type="com.apple.InterfaceBuilder3.CocoaTouch.Storyboard.XIB" version="3.0" toolsVersion="14854.2" targetRuntime="iOS.CocoaTouch" propertyAccessControl="none" useAutolayout="YES" useTraitCollections="YES" useSafeAreas="YES" colorMatched="YES" initialViewController="0dS-yy-a44">
     <device id="retina6_1" orientation="portrait" appearance="light"/>
     <dependencies>
         <deployment identifier="iOS"/>
-        <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="14799.2"/>
+        <plugIn identifier="com.apple.InterfaceBuilder.IBCocoaTouchPlugin" version="14806.4"/>
         <capability name="Safe area layout guides" minToolsVersion="9.0"/>
         <capability name="documents saved in the Xcode 8 format" minToolsVersion="8.0"/>
     </dependencies>
@@ -22,6 +22,13 @@
                                     <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" horizontalHuggingPriority="251" verticalHuggingPriority="251" translatesAutoresizingMaskIntoConstraints="NO" id="DRY-6g-a1c">
                                         <rect key="frame" x="0.0" y="0.0" width="414" height="774"/>
                                     </imageView>
+                                    <view contentMode="scaleToFill" translatesAutoresizingMaskIntoConstraints="NO" id="xOp-VT-gCs" userLabel="Machine Region of Interest">
+                                        <rect key="frame" x="99.5" y="129" width="215" height="516"/>
+                                        <color key="backgroundColor" white="0.0" alpha="0.0" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
+                                        <constraints>
+                                            <constraint firstAttribute="width" secondItem="xOp-VT-gCs" secondAttribute="height" multiplier="1.25:3" id="vrY-f6-rUp"/>
+                                        </constraints>
+                                    </view>
                                     <view contentMode="scaleToFill" translatesAutoresizingMaskIntoConstraints="NO" id="FNw-Am-XHt">
                                         <rect key="frame" x="86" y="193.5" width="242" height="387"/>
                                         <color key="backgroundColor" white="0.0" alpha="0.0" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
@@ -32,12 +39,15 @@
                                 </subviews>
                                 <color key="backgroundColor" white="0.66666666666666663" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
                                 <constraints>
+                                    <constraint firstItem="xOp-VT-gCs" firstAttribute="height" secondItem="vqB-Lw-hL8" secondAttribute="height" multiplier="0.667" id="08L-EU-TwQ"/>
                                     <constraint firstItem="FNw-Am-XHt" firstAttribute="centerX" secondItem="vqB-Lw-hL8" secondAttribute="centerX" id="2d8-bB-qci"/>
                                     <constraint firstItem="DRY-6g-a1c" firstAttribute="centerX" secondItem="vqB-Lw-hL8" secondAttribute="centerX" id="7j3-f6-gD2"/>
                                     <constraint firstItem="FNw-Am-XHt" firstAttribute="height" secondItem="vqB-Lw-hL8" secondAttribute="height" multiplier="0.5" id="Ei5-qR-ze1"/>
+                                    <constraint firstItem="xOp-VT-gCs" firstAttribute="centerY" secondItem="vqB-Lw-hL8" secondAttribute="centerY" id="MOb-rF-OnY"/>
                                     <constraint firstItem="FNw-Am-XHt" firstAttribute="centerY" secondItem="vqB-Lw-hL8" secondAttribute="centerY" id="OlS-tP-efX"/>
                                     <constraint firstItem="DRY-6g-a1c" firstAttribute="height" secondItem="vqB-Lw-hL8" secondAttribute="height" id="YPs-Fq-NPy"/>
                                     <constraint firstItem="DRY-6g-a1c" firstAttribute="centerY" secondItem="vqB-Lw-hL8" secondAttribute="centerY" id="fFO-Qa-j8l"/>
+                                    <constraint firstItem="xOp-VT-gCs" firstAttribute="centerX" secondItem="vqB-Lw-hL8" secondAttribute="centerX" id="rGB-Q2-0w0"/>
                                     <constraint firstItem="DRY-6g-a1c" firstAttribute="width" secondItem="vqB-Lw-hL8" secondAttribute="width" id="y5n-kW-3f6"/>
                                 </constraints>
                             </view>
@@ -77,7 +87,7 @@
                                 </connections>
                             </button>
                         </subviews>
-                        <color key="backgroundColor" xcode11CocoaTouchSystemColor="systemBackgroundColor" cocoaTouchSystemColor="whiteColor"/>
+                        <color key="backgroundColor" systemColor="systemBackgroundColor" cocoaTouchSystemColor="whiteColor"/>
                         <constraints>
                             <constraint firstItem="vqB-Lw-hL8" firstAttribute="leading" secondItem="6Tk-OE-BBY" secondAttribute="leading" id="BBZ-dw-Zro"/>
                             <constraint firstItem="RUG-zC-pvf" firstAttribute="leading" secondItem="6Tk-OE-BBY" secondAttribute="leading" constant="32" id="BVa-kw-2oE"/>
@@ -101,6 +111,7 @@
                         <outlet property="coinModeButton" destination="RUG-zC-pvf" id="jRM-lk-6DS"/>
                         <outlet property="imageView" destination="DRY-6g-a1c" id="Pce-Go-4WJ"/>
                         <outlet property="machineModeButton" destination="diW-7D-3fF" id="KZ3-ea-aB8"/>
+                        <outlet property="machineRegionOfInterest" destination="xOp-VT-gCs" id="cdD-o9-jnG"/>
                         <outlet property="regionOfInterest" destination="FNw-Am-XHt" id="dmU-nt-TFb"/>
                     </connections>
                 </viewController>
@@ -120,7 +131,7 @@
                                 <rect key="frame" x="0.0" y="88" width="414" height="774"/>
                             </imageView>
                         </subviews>
-                        <color key="backgroundColor" xcode11CocoaTouchSystemColor="systemBackgroundColor" cocoaTouchSystemColor="whiteColor"/>
+                        <color key="backgroundColor" systemColor="systemBackgroundColor" cocoaTouchSystemColor="whiteColor"/>
                         <constraints>
                             <constraint firstItem="FpO-Ie-XjT" firstAttribute="height" secondItem="a0l-Ji-ycl" secondAttribute="height" id="SaQ-9t-5wf"/>
                             <constraint firstItem="FpO-Ie-XjT" firstAttribute="centerY" secondItem="a0l-Ji-ycl" secondAttribute="centerY" id="eor-ul-EoK"/>

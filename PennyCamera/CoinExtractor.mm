@@ -93,7 +93,6 @@ static CGRect calculateScaledROI( CGRect roi, CGRect frame, CGSize image ) {
 
         frame = CGRectApplyAffineTransform(frame, scale);
         translated = CGRectApplyAffineTransform(roi, scale);
-//        NSLog( @"Transforming %@ by %@", NSStringFromCGRect(roi), NSStringFromCGAffineTransform(scale) );
 
         translated.origin.x += (image.width - frame.size.width) / 2.0;
     }
@@ -105,95 +104,6 @@ static CGRect calculateScaledROI( CGRect roi, CGRect frame, CGSize image ) {
 static cv::Rect2f scaleROI(CGRect roi, CGRect frame, CGSize image) {
     CGRect translated = calculateScaledROI(roi, frame, image);
     return cv::Rect2f(translated.origin.x, translated.origin.y, translated.size.width, translated.size.height);
-}
-
-@interface UIImage (OpenCV)
-- (cv::Mat)mat;
-- (cv::Mat)matGray;
-- (UIImage *)png;
-+ (nullable UIImage*)fromMat:(cv::Mat)cvMat;
-@end
-
-@implementation CoinExtractor
-+ (NSString*)openCVVersionString {
-    return [NSString stringWithFormat:@"OpenCV Version %s", CV_VERSION];
-}
-
-+ (CGRect)calculateScaledROI:(CGRect)roi frame:(CGRect)frame extent:(CGSize)image {
-    return calculateScaledROI(roi, frame, image);
-}
-
-+ (UIImage *)drawEllipseOnImage:(UIImage *)image withROI:(CGRect)rect withFrame:(CGRect)frame {
-
-    cv::Mat mat( [image mat] );
-    // Translate the ROI into the coordinate system of the resized image.
-    cv::Rect2f roi = scaleROI(rect, frame, image.size);
-
-    std::optional<cv::RotatedRect> ellipse = findEllipse(threshold(mat(roi)), roi);
-
-    if( ellipse ) {
-        cv::ellipse(mat, ellipse.value(), cv::Scalar(127, 127, 255), 3);
-    }
-
-    return [UIImage fromMat:mat];
-}
-
-+ (UIImage *)drawEllipseOnCIImage:(CIImage *)image withContext:(CIContext *)context withROI :(CGRect)rect withFrame:(CGRect)frame {
-    CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
-    CGFloat width = image.extent.size.width;
-    CGFloat height = image.extent.size.height;
-
-    cv::Mat mat8uc4((int)height, (int)width, CV_8UC4);
-
-    [context render:image
-           toBitmap:mat8uc4.data
-           rowBytes:mat8uc4.step
-             bounds:image.extent
-             format:kCIFormatRGBA8
-         colorSpace:colorSpace];
-
-    CGColorSpaceRelease(colorSpace);
-
-//    cv::Mat mat8uc3(width, height, CV_8UC3);
-//    cv::cvtColor(mat8uc4, mat8uc3, cv::COLOR_RGBA2BGR);
-
-    cv::Rect2f roi = scaleROI(rect, frame, image.extent.size);
-    std::optional<cv::RotatedRect> ellipse = findEllipse(threshold(mat8uc4(roi)), roi);
-
-    if( ellipse ) {
-        cv::ellipse(mat8uc4, ellipse.value(), cv::Scalar(127, 127, 255), 3);
-    }
-
-    return [UIImage fromMat:mat8uc4];
-}
-
-+ (UIImage *)drawEllipseOnPixelBuffer:(CVPixelBufferRef)buffer withROI:(CGRect)rect withFrame:(CGRect)frame {
-    OSType format = CVPixelBufferGetPixelFormatType(buffer);
-    CGRect videoRect = CGRectMake(0.0f, 0.0f, CVPixelBufferGetWidth(buffer), CVPixelBufferGetHeight(buffer));
-    size_t bytesPerRow = CVPixelBufferGetBytesPerRow(buffer);
-
-    assert(format == kCVPixelFormatType_32BGRA);
-
-    std::optional<cv::RotatedRect> ellipse;
-
-    {
-        CVPixelBufferLockBaseAddress(buffer, 0);
-        void *baseAddress = CVPixelBufferGetBaseAddress(buffer);
-        cv::Mat mat8uc4(videoRect.size.height, videoRect.size.width, CV_8UC4, baseAddress, bytesPerRow);
-        cv::Rect2f roi = scaleROI(rect, frame, videoRect.size);
-        ellipse = findEllipse(threshold(mat8uc4(roi)), roi);
-        CVPixelBufferUnlockBaseAddress(buffer, 0);
-    }
-
-    if( ellipse ) {
-        // TODO: Invert the transforms used to scale the roi so that we can return an image of frame.size.
-        cv::Mat result = cv::Mat(cv::Size2i(videoRect.size.width, videoRect.size.height), CV_8UC4, cv::Scalar(0, 0, 0, 0));
-        cv::ellipse(result, ellipse.value(), cv::Scalar(64, 64, 255, 255), 5);
-
-        return [UIImage fromMat:result];
-    }
-
-    return nil;
 }
 
 static cv::Mat rotate(const cv::Mat &mat, const cv::RotatedRect &ellipse) {
@@ -228,6 +138,50 @@ static cv::Mat resize(const cv::Mat &mat, size_t height) {
     return result;
 }
 
+@interface UIImage (OpenCV)
+- (cv::Mat)mat;
+- (cv::Mat)matGray;
++ (nullable UIImage*)fromMat:(cv::Mat)cvMat;
+@end
+
+@implementation CoinExtractor
++ (NSString*)openCVVersionString {
+    return [NSString stringWithFormat:@"OpenCV Version %s", CV_VERSION];
+}
+
++ (CGRect)calculateScaledROI:(CGRect)roi frame:(CGRect)frame extent:(CGSize)image {
+    return calculateScaledROI(roi, frame, image);
+}
+
++ (UIImage *)drawEllipseOnPixelBuffer:(CVPixelBufferRef)buffer withROI:(CGRect)rect withFrame:(CGRect)frame {
+    OSType format = CVPixelBufferGetPixelFormatType(buffer);
+    CGRect videoRect = CGRectMake(0.0f, 0.0f, CVPixelBufferGetWidth(buffer), CVPixelBufferGetHeight(buffer));
+    size_t bytesPerRow = CVPixelBufferGetBytesPerRow(buffer);
+
+    assert(format == kCVPixelFormatType_32BGRA);
+
+    std::optional<cv::RotatedRect> ellipse;
+
+    {
+        CVPixelBufferLockBaseAddress(buffer, 0);
+        void *baseAddress = CVPixelBufferGetBaseAddress(buffer);
+        cv::Mat mat8uc4(videoRect.size.height, videoRect.size.width, CV_8UC4, baseAddress, bytesPerRow);
+        cv::Rect2f roi = scaleROI(rect, frame, videoRect.size);
+        ellipse = findEllipse(threshold(mat8uc4(roi)), roi);
+        CVPixelBufferUnlockBaseAddress(buffer, 0);
+    }
+
+    if( ellipse ) {
+        // TODO: Invert the transforms used to scale the roi so that we can return an image of frame.size.
+        cv::Mat result = cv::Mat(cv::Size2i(videoRect.size.width, videoRect.size.height), CV_8UC4, cv::Scalar(0, 0, 0, 0));
+        cv::ellipse(result, ellipse.value(), cv::Scalar(64, 64, 255, 255), 5);
+
+        return [UIImage fromMat:result];
+    }
+
+    return nil;
+}
+
 + (UIImage *)captureEllipseOnImage:(UIImage *)image withROI:(CGRect)rect withFrame:(CGRect)frame {
     cv::Mat mat( [image mat] );
     cv::Rect2f roi = scaleROI(rect, frame, image.size);
@@ -252,11 +206,25 @@ static cv::Mat resize(const cv::Mat &mat, size_t height) {
 
     assert( result.type() == CV_8UC4 );
 
-//    NSLog(@"Saving Ellipse: (%f, %f) @ %f %fx%f", ellipse->center.x, ellipse->center.y, ellipse->angle, ellipse->size.width, ellipse->size.height);
-
     result = rotate(result, ellipse.value());
     result = resize(result, 450);
-    return [[UIImage fromMat: result] png];
+    return [UIImage fromMat: result];
+}
+
++ (nullable UIImage *)captureMachineOnImage:(nonnull UIImage *)image withROI:(CGRect)rect withFrame:(CGRect)frame {
+    static const size_t dx = 24, dy = 60;
+
+    cv::Rect2f roi = scaleROI(rect, frame, image.size);
+    cv::Rect2i region = cv::Rect2i( roi.x - dx, roi.y - dy, roi.width + dx * 2, roi.height + dy * 2 );
+    cv::Mat mat( [image mat] ), blur, mask(region.height, region.width, CV_8UC1);
+
+    cv::GaussianBlur(mat(region), blur, cv::Size(99, 99), 0, 0, cv::BORDER_DEFAULT);
+    cv::rectangle(mask, cv::Point2i(dx, dy), cv::Point2i(region.width - dx, region.height - dy), cv::Scalar(255), -1);
+    cv::copyTo(mat(region), blur, mask);
+
+    blur = resize(blur, 450);
+
+    return [UIImage fromMat: blur];
 }
 
 @end
@@ -324,13 +292,6 @@ static cv::Mat resize(const cv::Mat &mat, size_t height) {
     return cvMat;
 }
 
-- (UIImage*)png {
-    NSData *pngData = UIImagePNGRepresentation(self);
-    UIImage *pngImage = [UIImage imageWithData:pngData];
-
-    return pngImage;
-}
-
 + (UIImage*)fromMat:(cv::Mat)cvMat {
 
     cv::Mat matRGB;
@@ -368,22 +329,5 @@ static cv::Mat resize(const cv::Mat &mat, size_t height) {
 
     return finalImage;
 }
-
-//- (BOOL) saveToURL:(NSURL *)url withLocation:(CLLocation*)location {
-//    NSDictionary *options = @{
-//        (__bridge NSString*)kCGImagePropertyOrientation : [NSNumber numberWithInt:kCGImagePropertyOrientationUp],
-//        (__bridge NSString*)kCGImagePropertyHasAlpha : @YES,
-//        (__bridge NSString*)kCGImageDestinationLossyCompressionQuality : @1.0,
-//    };
-//
-//
-//    CGImageDestinationRef myImageDest = CGImageDestinationCreateWithURL((CFURLRef)url, imageType, 1, nil);
-//    CGImageDestinationAddImage(myImageDest, image, options);
-//    CGImageDestinationFinalize(myImageDest);
-//    CFRelease(myImageDest);
-//
-//
-//    return NULL;
-//}
 
 @end

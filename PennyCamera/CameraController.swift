@@ -111,32 +111,40 @@ class CameraController: NSObject {
     private func configureSession() throws {
         self.captureSession = AVCaptureSession()
 
-        try self.configureCaptureDevices()
+        self.rearCamera = try self.configureCaptureDevice()
         try self.configureDeviceInputs()
         try self.configureOutputs()
     }
 
-    private func configureCaptureDevices() throws {
-        if let device = AVCaptureDevice.default(.builtInDualCamera, for: .video, position: .back) {
-            self.rearCamera = device
-            let availableFormats = device.formats.filter {
-                !$0.supportedDepthDataFormats.isEmpty && $0.mediaType == AVMediaType.video
-            }
-            print("Available Formats", availableFormats)
-            print("Depth Data Formats", availableFormats[0].supportedDepthDataFormats)
+    private func configureCaptureDeviceForDepth() throws -> AVCaptureDevice {
+        guard let device = AVCaptureDevice.default(.builtInDualCamera, for: .video, position: .back) else { throw CameraControllerError.noCamerasAvailable }
 
-            try device.lockForConfiguration()
-            device.focusMode = .continuousAutoFocus
-            device.activeFormat = availableFormats[0]
-            device.activeDepthDataFormat = availableFormats[0].supportedDepthDataFormats.first
-            device.unlockForConfiguration()
-        } else if let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back)  {
-            try device.lockForConfiguration()
-            device.focusMode = .continuousAutoFocus
-            device.unlockForConfiguration()
-        } else {
-            throw CameraControllerError.noCamerasAvailable
+        let availableFormats = device.formats.filter {
+            !$0.supportedDepthDataFormats.isEmpty && $0.mediaType == AVMediaType.video
+        }.filter {
+            let dimensions = CMVideoFormatDescriptionGetDimensions($0.formatDescription)
+            return max( dimensions.width, dimensions.height ) >= 1280
         }
+        print("Available Formats", availableFormats)
+        print("Depth Data Formats", availableFormats[0].supportedDepthDataFormats)
+
+        try device.lockForConfiguration()
+        device.focusMode = .continuousAutoFocus
+        device.activeFormat = availableFormats[0]
+        device.activeDepthDataFormat = availableFormats[0].supportedDepthDataFormats.first
+        device.unlockForConfiguration()
+
+        return device
+    }
+
+    private func configureCaptureDevice() throws -> AVCaptureDevice {
+        guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else { throw CameraControllerError.noCamerasAvailable }
+
+        try device.lockForConfiguration()
+        device.focusMode = .continuousAutoFocus
+        device.unlockForConfiguration()
+
+        return device
     }
 
     private func configureDeviceInputs() throws {
@@ -155,6 +163,7 @@ class CameraController: NSObject {
 
     private func configureOutputs() throws {
         guard let captureSession = self.captureSession else { throw CameraControllerError.captureSessionIsMissing }
+        var depthEnabled = false
 
         captureSession.beginConfiguration()
 
@@ -169,6 +178,7 @@ class CameraController: NSObject {
         // Capture Depth information for "Machine" pictures.
         if photoOutput.isDepthDataDeliverySupported {
             photoOutput.isDepthDataDeliveryEnabled = true
+            depthEnabled = true
         }
 
         if captureSession.canAddOutput(photoOutput) {
@@ -182,10 +192,6 @@ class CameraController: NSObject {
         videoOutput.setSampleBufferDelegate(self, queue: dataOutputQueue)
         videoOutput.alwaysDiscardsLateVideoFrames = true
 
-        if #available(iOS 13.0, *) {
-            videoOutput.deliversPreviewSizedOutputBuffers = true
-        }
-
         if captureSession.canAddOutput(videoOutput) {
             captureSession.addOutput(videoOutput)
 
@@ -195,44 +201,44 @@ class CameraController: NSObject {
         }
         self.videoOutput = videoOutput
 
-        let depthDataOutput = AVCaptureDepthDataOutput()
-        depthDataOutput.setDelegate(self, callbackQueue: dataOutputQueue)
-        depthDataOutput.alwaysDiscardsLateDepthData = true
-        depthDataOutput.isFilteringEnabled = true // i.e. smooth.
+        if depthEnabled {
+            let depthDataOutput = AVCaptureDepthDataOutput()
+            depthDataOutput.setDelegate(self, callbackQueue: dataOutputQueue)
+            depthDataOutput.alwaysDiscardsLateDepthData = true
+            depthDataOutput.isFilteringEnabled = true // i.e. smooth.
 
-        if captureSession.canAddOutput(depthDataOutput) {
-            captureSession.addOutput(depthDataOutput)
+            if captureSession.canAddOutput(depthDataOutput) {
+                captureSession.addOutput(depthDataOutput)
 
-            if let connection = depthDataOutput.connection(with: .depthData) {
-                connection.videoOrientation = .portrait
-                connection.isEnabled = true
+                if let connection = depthDataOutput.connection(with: .depthData) {
+                    connection.videoOrientation = .portrait
+                    connection.isEnabled = true
+                }
+
+                // Use an AVCaptureDataOutputSynchronizer to synchronize the video data and depth data outputs.
+                // The first output in the dataOutputs array, in this case the AVCaptureVideoDataOutput, is the "master" output.
+                let outputSynchronizer = AVCaptureDataOutputSynchronizer(dataOutputs: [videoOutput, depthDataOutput])
+                outputSynchronizer.setDelegate(self, queue: dataOutputQueue)
+                self.outputSynchronizer = outputSynchronizer
             }
-
-            // Use an AVCaptureDataOutputSynchronizer to synchronize the video data and depth data outputs.
-            // The first output in the dataOutputs array, in this case the AVCaptureVideoDataOutput, is the "master" output.
-            let outputSynchronizer = AVCaptureDataOutputSynchronizer(dataOutputs: [videoOutput, depthDataOutput])
-            outputSynchronizer.setDelegate(self, queue: dataOutputQueue)
-            self.outputSynchronizer = outputSynchronizer
+            self.depthDataOutput = depthDataOutput
         }
-        self.depthDataOutput = depthDataOutput
 
         captureSession.commitConfiguration()
 
         try self.rearCamera?.lockForConfiguration()
 
         if let device = self.rearCamera {
-            let availableFormats = device.formats.filter {
-                !$0.supportedDepthDataFormats.isEmpty && $0.mediaType == AVMediaType.video
-            }
-            print("Available Formats", availableFormats)
-            print("Depth Data Formats", availableFormats[0].supportedDepthDataFormats)
-
-
             device.focusMode = .continuousAutoFocus
-            device.activeFormat = availableFormats[0]
-            device.activeDepthDataFormat = availableFormats[0].supportedDepthDataFormats.first
-
             device.activeVideoMinFrameDuration = CMTime(value: 1, timescale: 15)
+
+            if depthEnabled {
+                let availableFormats = device.formats.filter {
+                    !$0.supportedDepthDataFormats.isEmpty && $0.mediaType == AVMediaType.video
+                }
+                device.activeFormat = availableFormats[0]
+                device.activeDepthDataFormat = availableFormats[0].supportedDepthDataFormats.first
+            }
         }
 
         captureSession.startRunning()

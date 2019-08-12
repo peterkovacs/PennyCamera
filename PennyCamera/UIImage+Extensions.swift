@@ -54,6 +54,17 @@ extension UIImage {
         return CGImageDestinationFinalize(destination)
     }
 
+    func save(jpeg url: URL, with location: CLLocation?) -> Bool {
+        guard let data = jpegData(compressionQuality: 0.9) else { return false }
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return false }
+        guard let destination = CGImageDestinationCreateWithURL(url as CFURL, kUTTypeJPEG, 1, nil) else { return false }
+
+        let metadata = location?.metadata
+        CGImageDestinationAddImageFromSource(destination, source, 0, metadata as CFDictionary?)
+
+        return CGImageDestinationFinalize(destination)
+    }
+
     func fixedOrientation() -> UIImage {
         guard let cgImage = self.cgImage else { return self }
         if imageOrientation == .up { return self }
